@@ -57,7 +57,7 @@ class PicFile():
     def __init__(self, pic_dir, fname):
         self.file_name = fname
         self.pic_dir = pic_dir
-        time.sleep(0.0001)
+        #time.sleep(0.0001)
 
 class PicLibrary ():
     '''
