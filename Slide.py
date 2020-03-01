@@ -96,8 +96,7 @@ class Slide():
         self.sprite.unif[os2] = 0.0
 
     def load_image(self, path, fit=True):
-        #self.next_pic = Pic(path, os.path.dirname(path), os.path.basename(path))
-        self.next_pic = Pic(path)
+        self.next_pic = Pic(path, os.path.dirname(path), os.path.basename(path))
         self.next_pic.dt = None
         self.sprite.unif[44] = 1.0
         self.set_next_texture(fit)
@@ -110,7 +109,9 @@ class Slide():
             if self.next_pic.tex is not None:
                 return
 
-    def transition_to_image(self, fit=True, start_delay=0, trans_secs=0):
+    def transition_to_image(self, piclib, fit=True, start_delay=0, trans_secs=0):
+        self.load_thread = Thread(name='Slide Load', target=self.load_lib_image, args=(piclib, fit))
+        self.load_thread.start()
         time.sleep(start_delay)
         # Wait (if required) for image to load into next_tex
         self.load_thread.join()
@@ -128,9 +129,7 @@ class Slide():
         self.sprite.unif[44] = 1.0
 
     def start_trans_to_next(self, piclib, fit=True, start_delay=10, trans_secs=3):
-        self.load_thread = Thread(name='Slide Load', target=self.load_lib_image, args=(piclib, fit))
-        self.load_thread.start()
-        self.trans_thread = Thread(name='Slide Transition', target=self.transition_to_image, args=(fit, start_delay, trans_secs))
+        self.trans_thread = Thread(name='Slide Transition', target=self.transition_to_image, args=(piclib, fit, start_delay, trans_secs))
         self.trans_thread.start()
 
     def draw(self):

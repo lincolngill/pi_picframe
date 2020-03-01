@@ -135,7 +135,7 @@ def display_libupdating():
         if pl.file_cnt == 0:
             display_state = DisplayState.NOSLIDES
         else:
-            slide.start_trans_to_next(pl)
+            slide.start_trans_to_next(pl, start_delay=0)
             title_tb.set_text('{:25}'.format(''))
             display_state = DisplayState.NEXTSLIDE
 
@@ -160,7 +160,9 @@ def display_nextslide():
         slide.draw()
         text.draw()
     else:
-        slide.start_trans_to_next(pl)
+        slide.start_trans_to_next(pl, start_delay=time_delay, trans_secs=fade_time)
+        slide.draw()
+        text.draw()
 
 class DisplayState(Enum):
     INIT_LIBUPDATE = 1
@@ -193,10 +195,6 @@ while DISPLAY.loop_running():
             break
         if k == ord(' '):
             paused = not paused
-        if k == ord('s'):  # go back a picture
-            next_pic_num -= 2
-            if next_pic_num < -1:
-                next_pic_num = -1
 
 if KEYBOARD:
     kbd.close()
