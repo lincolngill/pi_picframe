@@ -128,18 +128,8 @@ class PicLibrary ():
         self.cur_pic = None
         self.pic_dirs = []
         self.pic_files = []
-        self.cur_pos = -1
         self.file_cnt = 0
         self.dir_cnt = 0
-
-    def next_pic(self):
-        if self.file_cnt == 0:
-            return None
-        self.cur_pos += 1
-        if self.cur_pos >= self.file_cnt:
-            self.cur_pos = 0
-        self.cur_pic = self.pic_files[self.cur_pos]
-        return self.cur_pic
         
     def dump_dirs(self):
         '''

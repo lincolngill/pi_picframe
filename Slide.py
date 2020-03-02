@@ -73,9 +73,7 @@ class Slide():
         self.next_pic = None
         self.display = display
 
-    def set_next_texture(self, fit=True):
-        if self.next_pic is None: # have not get a new pic
-            return
+    def set_fg_to_next(self, fit=True):
         # Re texture sprite
         self.bg_pic = self.fg_pic
         self.fg_pic = self.next_pic
@@ -98,25 +96,26 @@ class Slide():
     def load_image(self, path, fit=True):
         self.next_pic = Pic(path, os.path.dirname(path), os.path.basename(path))
         self.next_pic.dt = None
-        self.sprite.unif[44] = 1.0
-        self.set_next_texture(fit)
+        self.transition_to_next(fit)
 
-    def load_lib_image(self, piclib, fit=True):
-        for __i in range(10): # max files to check
-            np = piclib.next_pic()
-            np_path = os.path.join(piclib.src_dir, np.pic_dir.rel_dir_name, np.file_name)
-            self.next_pic = Pic(np_path, np.pic_dir.rel_dir_name, np.file_name)
-            if self.next_pic.tex is not None:
-                return
+    def load_next_image(self, root_path, piclist, fit=True):
+        try:
+            for __i in range(10): # max files to check
+                np = next(piclist)
+                np_path = os.path.join(root_path, np.pic_dir.rel_dir_name, np.file_name)
+                self.next_pic = Pic(np_path, np.pic_dir.rel_dir_name, np.file_name)
+                if self.next_pic.tex is not None:
+                    break
+        except StopIteration:
+            self.next_pic = None
 
-    def transition_to_image(self, piclib, fit=True, start_delay=0, trans_secs=0):
-        self.load_thread = Thread(name='Slide Load', target=self.load_lib_image, args=(piclib, fit))
+    def start_load_next_image(self, root_path, piclist, fit=True):
+        self.load_thread = Thread(name='Slide Load', target=self.load_next_image, args=(root_path, piclist, fit))
         self.load_thread.start()
-        time.sleep(start_delay)
-        # Wait (if required) for image to load into next_tex
-        self.load_thread.join()
-        self.set_next_texture(fit)
-        # Do the alpha transition
+
+    def transition_to_next(self, fit=True, trans_secs=0):
+        self.set_fg_to_next(fit)
+        # Do the alpha transition. Fade in fg
         alpha = 0.0
         tick_cnt = math.ceil(trans_secs/0.2)
         if tick_cnt > 0:
@@ -127,10 +126,6 @@ class Slide():
                 time.sleep(0.2)
         # set alpha to complete
         self.sprite.unif[44] = 1.0
-
-    def start_trans_to_next(self, piclib, fit=True, start_delay=10, trans_secs=3):
-        self.trans_thread = Thread(name='Slide Transition', target=self.transition_to_image, args=(piclib, fit, start_delay, trans_secs))
-        self.trans_thread.start()
 
     def draw(self):
         self.sprite.draw()

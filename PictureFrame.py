@@ -10,6 +10,7 @@ import pi3d
 from enum import Enum
 import PicLibrary as PLib
 from Slide import Slide
+from threading import Thread
 
 # these are needed for getting exif data from images
 from PIL import Image, ExifTags, ImageFilter
@@ -99,7 +100,7 @@ title_tb = pi3d.TextBlock(x = DISPLAY.width * -0.25,  y = DISPLAY.height * 0.5 -
                            size = 0.99, spacing = "F", space = 0.02, colour = colourGradient)
 text.add_text_block(title_tb)
 
-date_tb = pi3d.TextBlock(x = DISPLAY.width * 0.5 -250,  y = DISPLAY.height * -0.5 + 50, z = 0.1, rot = 0.0, char_count = 12, text_format = '{:12}'.format(''),
+date_tb = pi3d.TextBlock(x = DISPLAY.width * 0.5 -340,  y = DISPLAY.height * -0.5 + 50, z = 0.1, rot = 0.0, char_count = 15, text_format = '{:15}'.format(''),
                            size = 0.5, spacing = "F", space = 0.02, colour = colourGradient)
 text.add_text_block(date_tb)
 
@@ -107,91 +108,71 @@ text.add_text_block(date_tb)
 def pad(s):
     return '{:100}'.format(s)
 
-
-def display_init_libupdate():
-    global slide, display_state
-    slide.load_image(BG_IMAGE)
-    slide.draw()
-    title_tb.set_text('{:25}'.format('Gills Picture Frame v1.0'))
-    date_tb.set_text('{:12}'.format(''))
-    text.regen()
-    text.draw()
-    pl.update()
-    display_state = DisplayState.LIBUPDATING
-
-def display_libupdating():
-    global slide, display_state
-    if pl.update_thread.is_alive():
-        if pl.cur_pic is None:
+def process_thread(display_elements, time_delay=10, trans_secs=3):
+    global slide, run_proc
+    try:
+        run_proc = True
+        slide.load_image(BG_IMAGE)
+        display_elements.append(slide)
+        display_elements.append(text)
+        #for __i in range(2):
+        while run_proc:
+            slide.load_image(BG_IMAGE)
+            title_tb.set_text('{:25}'.format('Gills Picture Frame v1.1'))
+            date_tb.set_text('{:15}'.format(''))
             dir_tb.set_text(pad(''))
-            file_tb.set_text(pad('No Picture!'))
-        else:
-            dir_tb.set_text(pad(pl.cur_pic.pic_dir.rel_dir_name))
-            file_tb.set_text(pad((pl.cur_pic.file_name)))
-        text.regen()
-        slide.draw()
-        text.draw()
-    else:
-        if pl.file_cnt == 0:
-            display_state = DisplayState.NOSLIDES
-        else:
-            slide.start_trans_to_next(pl, start_delay=0)
-            title_tb.set_text('{:25}'.format(''))
-            display_state = DisplayState.NEXTSLIDE
-
-
-def display_noslides():
-    global slide, display_state
-    dir_tb.set_text(pad(''))
-    file_tb.set_text(pad('No images selected!'))
-    text.regen()
-    slide.draw()
-    text.draw()
-
-
-def display_nextslide():
-    global slide, display_state
-    if slide.trans_thread.is_alive():
-        if slide.fg_pic.dt is not None:
-            dir_tb.set_text(pad(slide.fg_pic.rel_dir_name))
-            file_tb.set_text(pad(slide.fg_pic.fname))
-            date_tb.set_text(time.strftime("%d %b %Y", time.localtime(slide.fg_pic.dt)))
+            file_tb.set_text(pad(''))
             text.regen()
-        slide.draw()
-        text.draw()
-    else:
-        slide.start_trans_to_next(pl, start_delay=time_delay, trans_secs=fade_time)
-        slide.draw()
-        text.draw()
+            pl.update()
+            while pl.update_thread.is_alive():
+                if pl.cur_pic is None:
+                    dir_tb.set_text(pad(''))
+                    file_tb.set_text(pad('No Picture!'))
+                else:
+                    dir_tb.set_text(pad(pl.cur_pic.pic_dir.rel_dir_name))
+                    file_tb.set_text(pad((pl.cur_pic.file_name)))
+                text.regen()
+                time.sleep(0.05)
+            if pl.file_cnt == 0:
+                dir_tb.set_text(pad(''))
+                file_tb.set_text(pad('No images selected!'))
+                text.regen()
+                while run_proc: # go to sleep
+                    time.sleep(10)
+                return
+            title_tb.set_text('{:25}'.format(''))
+            text.regen()
+            piclist = iter(pl.pic_files)
+            slide.load_next_image(pl.src_dir, piclist) # prime first image
+            while run_proc and slide.next_pic is not None:
+                slide.transition_to_next(trans_secs=trans_secs)
+                slide.start_load_next_image(pl.src_dir, piclist)
+                dir_tb.set_text(pad(slide.fg_pic.rel_dir_name))
+                file_tb.set_text(pad(slide.fg_pic.fname))
+                date_tb.set_text(time.strftime("%a %d %b %Y", time.localtime(slide.fg_pic.dt)))
+                text.regen()
+                time.sleep(time_delay)
+                # Wait (if required) for next image to load
+                slide.load_thread.join()
+    except KeyboardInterrupt:
+        print ('Bye')
+        return
 
-class DisplayState(Enum):
-    INIT_LIBUPDATE = 1
-    LIBUPDATING = 2
-    NOSLIDES = 3
-    NEXTSLIDE = 4
+display_elements = []
+run_proc = True
+proc_thread = Thread(target=process_thread, args=(display_elements, time_delay, fade_time))
+proc_thread.start()
 
-
-def display_function(state):
-    # print(state)
-    switch = {
-        DisplayState.INIT_LIBUPDATE: display_init_libupdate, 
-        DisplayState.LIBUPDATING:    display_libupdating, 
-        DisplayState.NOSLIDES:       display_noslides, 
-        DisplayState.NEXTSLIDE:      display_nextslide, 
-    }
-    func = switch.get(state, lambda: 'Invalid')
-    return func()
-
-
-display_state = DisplayState.INIT_LIBUPDATE
-
-while DISPLAY.loop_running():
-    display_function(display_state)
+# Main thread
+while DISPLAY.loop_running() and proc_thread.is_alive():
+    for e in display_elements:
+        e.draw()
     if KEYBOARD:
         k = kbd.read()
         if k != -1:
             nexttm = time.time() - 86400.0
         if k == 27 or quit:  # ESC
+            run_proc = False
             break
         if k == ord(' '):
             paused = not paused
