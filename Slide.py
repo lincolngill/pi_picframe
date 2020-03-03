@@ -62,12 +62,13 @@ class Pic():
         except Exception as e:
             print('''Couldn't load file {} giving error: {}'''.format(self.path, e))
 
-class Slide():
+class Slide(pi3d.Sprite):
 
     def __init__(self, display, camera, shader_path, edge_alpha):
-        self.sprite = pi3d.Sprite(camera = camera, w = display.width, h = display.height, z = 5.0)
-        self.sprite.set_shader(pi3d.Shader(shader_path))
-        self.sprite.unif[47] = edge_alpha
+        super(Slide, self).__init__(camera = camera, w = display.width, h = display.height, z = 5.0)
+        #self.sprite = pi3d.Sprite(camera = camera, w = display.width, h = display.height, z = 5.0)
+        self.set_shader(pi3d.Shader(shader_path))
+        self.unif[47] = edge_alpha
         self.bg_pic = None
         self.fg_pic = None
         self.next_pic = None
@@ -79,19 +80,19 @@ class Slide():
         self.fg_pic = self.next_pic
         if self.bg_pic is None: # First pic - Make bg = fg = next
             self.bg_pic = self.next_pic
-        self.sprite.set_textures([self.fg_pic.tex, self.bg_pic.tex,])
-        self.sprite.unif[45:47] = self.sprite.unif[42:44] # Transfer front w,h to back
-        self.sprite.unif[51:53] = self.sprite.unif[48:50] # Transfer front w,h offsets to back
+        self.set_textures([self.fg_pic.tex, self.bg_pic.tex,])
+        self.unif[45:47] = self.unif[42:44] # Transfer front w,h to back
+        self.unif[51:53] = self.unif[48:50] # Transfer front w,h offsets to back
         wh_rat = (self.display.width * self.fg_pic.tex.iy) / (self.display.height * self.fg_pic.tex.ix)
         if (wh_rat > 1.0 and fit) or (wh_rat <= 1.0 and not fit):
             sz1, sz2, os1, os2 = 42, 43, 48, 49
         else:
             sz1, sz2, os1, os2 = 43, 42, 49, 48
             wh_rat = 1.0 / wh_rat
-        self.sprite.unif[sz1] = wh_rat
-        self.sprite.unif[sz2] = 1.0
-        self.sprite.unif[os1] = (wh_rat - 1.0) * 0.5
-        self.sprite.unif[os2] = 0.0
+        self.unif[sz1] = wh_rat
+        self.unif[sz2] = 1.0
+        self.unif[os1] = (wh_rat - 1.0) * 0.5
+        self.unif[os2] = 0.0
 
     def load_image(self, path, fit=True):
         self.next_pic = Pic(path, os.path.dirname(path), os.path.basename(path))
@@ -122,10 +123,7 @@ class Slide():
             alpha_delta = 1.0/tick_cnt
             for __tick in range(tick_cnt):
                 alpha += alpha_delta
-                self.sprite.unif[44] = alpha
+                self.unif[44] = alpha
                 time.sleep(0.2)
         # set alpha to complete
-        self.sprite.unif[44] = 1.0
-
-    def draw(self):
-        self.sprite.draw()
+        self.unif[44] = 1.0

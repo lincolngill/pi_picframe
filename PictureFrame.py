@@ -84,73 +84,78 @@ nexttm = 0.0
 pl = PLib.PicLibrary(PIC_DIR)
 next_pic_num = 0
 
+class TextAttr():
+    dir = ''
+    fname = ''
+    date = ''
+    status = ''
+
+text_attr = TextAttr()
 font = pi3d.Font(FONT_FILE, FONT_COLOUR, codepoints = list(range(32, 128)), shadow_radius=4.0, shadow=(0,0,0,128))
-text = pi3d.PointText(font, CAMERA, max_chars = 250, point_size = 80)
 colourGradient = pi3d.TextBlockColourGradient((1.0, 0.0, 0.0, 1.0), (0.0, 1.0, 0.0, 1.0))
 
-dir_tb = pi3d.TextBlock(x = DISPLAY.width * -0.5 + 50,  y = DISPLAY.height * -0.5 + 100, z = 0.1, rot = 0.0, char_count = 100, text_format = '{:100}'.format(''),
+file_pt = pi3d.PointText(font, CAMERA, max_chars = 216, point_size = 80)
+dir_tb = pi3d.TextBlock(x = DISPLAY.width * -0.5 + 50,  y = DISPLAY.height * -0.5 + 100, z = 0.1, rot = 0.0, char_count = 100, text_format = '{:100}', data_obj=text_attr, attr="dir",
                            size = 0.5, spacing = "F", space = 0.02, colour = colourGradient)
-text.add_text_block(dir_tb)
+file_pt.add_text_block(dir_tb)
 
-file_tb = pi3d.TextBlock(x = DISPLAY.width * -0.5 + 50,  y = DISPLAY.height * -0.5 + 50, z = 0.1, rot = 0.0, char_count = 100, text_format = '{:100}'.format(''),
+file_tb = pi3d.TextBlock(x = DISPLAY.width * -0.5 + 50,  y = DISPLAY.height * -0.5 + 50, z = 0.1, rot = 0.0, char_count = 100, text_format = '{:100}', data_obj=text_attr, attr="fname",
                            size = 0.5, spacing = "F", space = 0.02, colour = colourGradient)
-text.add_text_block(file_tb)
- 
-title_tb = pi3d.TextBlock(x = DISPLAY.width * -0.25,  y = DISPLAY.height * 0.5 - 50, z = 0.1, rot = 0.0, char_count = 25, text_format = '{:25}'.format(''),
+file_pt.add_text_block(file_tb)
+
+date_tb = pi3d.TextBlock(x = DISPLAY.width * 0.5 -340,  y = DISPLAY.height * -0.5 + 50, z = 0.1, rot = 0.0, char_count = 15, text_format = '{:15}', data_obj=text_attr, attr="date",
+                           size = 0.5, spacing = "F", space = 0.02, colour = colourGradient)
+file_pt.add_text_block(date_tb)
+
+title_pt = pi3d.PointText(font, CAMERA, max_chars = 26, point_size = 100)
+title_tb = pi3d.TextBlock(x = DISPLAY.width * -0.25,  y = DISPLAY.height * 0.5 - 50, z = 0.1, rot = 0.0, char_count = 25, text_format = "Gills Picture Frame v1.2",
                            size = 0.99, spacing = "F", space = 0.02, colour = colourGradient)
-text.add_text_block(title_tb)
+title_pt.add_text_block(title_tb)
 
-date_tb = pi3d.TextBlock(x = DISPLAY.width * 0.5 -340,  y = DISPLAY.height * -0.5 + 50, z = 0.1, rot = 0.0, char_count = 15, text_format = '{:15}'.format(''),
-                           size = 0.5, spacing = "F", space = 0.02, colour = colourGradient)
-text.add_text_block(date_tb)
+status_pt = pi3d.PointText(font, CAMERA, max_chars = 26, point_size = 80)
+status_tb = pi3d.TextBlock(x = DISPLAY.width * -0.15,  y = DISPLAY.height * -0.5 + 200, z = 0.1, rot = 0.0, char_count = 25, text_format = '{:25}', data_obj=text_attr, attr="status",
+                           size = 0.99, spacing = "F", space = 0.02, colour = (1.0, 0.0, 0.0, 1.0))
+status_pt.add_text_block(status_tb)
 
-
-def pad(s):
-    return '{:100}'.format(s)
-
-def process_thread(display_elements, time_delay=10, trans_secs=3):
-    global slide, run_proc
+def process_thread(time_delay=10, trans_secs=3):
+    global slide, run_proc, display_elements
     try:
         run_proc = True
-        slide.load_image(BG_IMAGE)
-        display_elements.append(slide)
-        display_elements.append(text)
         #for __i in range(2):
         while run_proc:
             slide.load_image(BG_IMAGE)
-            title_tb.set_text('{:25}'.format('Gills Picture Frame v1.1'))
-            date_tb.set_text('{:15}'.format(''))
-            dir_tb.set_text(pad(''))
-            file_tb.set_text(pad(''))
-            text.regen()
+            text_attr.status = 'No Pictures!'
+            status_pt.regen()
+            display_elements = [slide, title_pt, status_pt]
             pl.update()
             while pl.update_thread.is_alive():
-                if pl.cur_pic is None:
-                    dir_tb.set_text(pad(''))
-                    file_tb.set_text(pad('No Picture!'))
-                else:
-                    dir_tb.set_text(pad(pl.cur_pic.pic_dir.rel_dir_name))
-                    file_tb.set_text(pad((pl.cur_pic.file_name)))
-                text.regen()
+                if pl.cur_pic is not None:
+                    text_attr.dir = pl.cur_pic.pic_dir.rel_dir_name
+                    text_attr.fname = pl.cur_pic.file_name
+                    file_pt.regen()
+                    display_elements = [slide, title_pt, file_pt]
                 time.sleep(0.05)
             if pl.file_cnt == 0:
-                dir_tb.set_text(pad(''))
-                file_tb.set_text(pad('No images selected!'))
-                text.regen()
+                text_attr.status = 'No images selected!'
+                status_pt.regen()
+                display_elements = [slide, title_pt, status_pt]
                 while run_proc: # go to sleep
                     time.sleep(10)
                 return
-            title_tb.set_text('{:25}'.format(''))
-            text.regen()
+            display_elements = [slide, file_pt]
             piclist = iter(pl.pic_files)
             slide.load_next_image(pl.src_dir, piclist) # prime first image
             while run_proc and slide.next_pic is not None:
+                text_attr.dir = slide.next_pic.rel_dir_name
+                text_attr.fname = slide.next_pic.fname
+                text_attr.date = time.strftime("%a %d %b %Y", time.localtime(slide.next_pic.dt))
+                file_pt.regen()
                 slide.transition_to_next(trans_secs=trans_secs)
                 slide.start_load_next_image(pl.src_dir, piclist)
-                dir_tb.set_text(pad(slide.fg_pic.rel_dir_name))
-                file_tb.set_text(pad(slide.fg_pic.fname))
-                date_tb.set_text(time.strftime("%a %d %b %Y", time.localtime(slide.fg_pic.dt)))
-                text.regen()
+                #text_attr.dir = slide.fg_pic.rel_dir_name
+                #text_attr.fname = slide.fg_pic.fname
+                #text_attr.date = time.strftime("%a %d %b %Y", time.localtime(slide.fg_pic.dt))
+                #file_pt.regen()
                 time.sleep(time_delay)
                 # Wait (if required) for next image to load
                 slide.load_thread.join()
@@ -160,7 +165,7 @@ def process_thread(display_elements, time_delay=10, trans_secs=3):
 
 display_elements = []
 run_proc = True
-proc_thread = Thread(target=process_thread, args=(display_elements, time_delay, fade_time))
+proc_thread = Thread(target=process_thread, args=(time_delay, fade_time,))
 proc_thread.start()
 
 # Main thread
@@ -169,8 +174,6 @@ while DISPLAY.loop_running() and proc_thread.is_alive():
         e.draw()
     if KEYBOARD:
         k = kbd.read()
-        if k != -1:
-            nexttm = time.time() - 86400.0
         if k == 27 or quit:  # ESC
             run_proc = False
             break
