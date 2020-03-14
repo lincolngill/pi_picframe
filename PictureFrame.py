@@ -152,10 +152,6 @@ def process_thread(time_delay=10, trans_secs=3):
                 file_pt.regen()
                 slide.transition_to_next(trans_secs=trans_secs)
                 slide.start_load_next_image(pl.src_dir, piclist)
-                #text_attr.dir = slide.fg_pic.rel_dir_name
-                #text_attr.fname = slide.fg_pic.fname
-                #text_attr.date = time.strftime("%a %d %b %Y", time.localtime(slide.fg_pic.dt))
-                #file_pt.regen()
                 time.sleep(time_delay)
                 # Wait (if required) for next image to load
                 slide.load_thread.join()
