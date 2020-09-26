@@ -12,11 +12,19 @@ import time
 import glob
 import threading
 import pi3d
+import PicLibrary as PLib
 
-from six_mod.moves import queue
+#from six_mod.moves import queue
+import queue
 
 # these are needed for getting exif data from images
 from PIL import Image, ExifTags, ImageFilter
+
+PATH_REGXS = {
+    'inc_dirs': [
+        r'2020.*',
+    ],
+}
 
 THIS_DIR = os.path.abspath(os.path.dirname(os.path.realpath(__file__)))
 FONT_FILE = os.path.join(THIS_DIR, 'fonts', 'NotoSans-Regular.ttf')
@@ -29,16 +37,22 @@ BACKGROUND = (0.2, 0.2, 0.2, 1.0)
 BG_IMAGE = os.path.join(THIS_DIR, 'background.jpg')
 FONT_COLOUR = (255, 255, 255, 255)
 
-LOGGER = pi3d.Log(__name__, level='INFO', format='%(message)s')
-LOGGER.info('''#########################################################
-press ESC to escape, S to go back, any key for next slide
-#########################################################''')
+NUM_SLIDES = 8
+TIME_DELAY = 6.0
+FADE_TIME = 3.0
+
+LOGGER = pi3d.Log(__name__, level='INFO', format='%(asctime)s %(levelname)-8s %(message)s')
+LOGGER.info('#########################################################')
+LOGGER.info('press ESC to escape, S to go back, any key for next slide')
+LOGGER.info('#########################################################')
 
 # Setup display and initialise pi3d
 DISPLAY = pi3d.Display.create(x=0, y=0, frames_per_second=FPS,
                               display_config=pi3d.DISPLAY_CONFIG_HIDE_CURSOR, background=BACKGROUND)
 LOGGER.info('Display W: {}   H: {}'.format(DISPLAY.width, DISPLAY.height))
-CAMERA = pi3d.Camera.instance()
+LOGGER.info('OpenGL ID: {}'.format(DISPLAY.opengl.gl_id))
+#CAMERA = pi3d.Camera.instance()
+CAMERA = pi3d.Camera(is_3d = False)
 shader = [
     #    pi3d.Shader(os.path.join(THIS_DIR, "shaders", "blend_new")),
     pi3d.Shader(os.path.join(THIS_DIR, "shaders", "blend_holes")),
@@ -47,13 +61,7 @@ shader = [
     pi3d.Shader(os.path.join(THIS_DIR, "shaders", "blend_bump"))
 ]
 
-iFiles = glob.glob(os.path.join(PIC_DIR, "2020*/*.jpg"))
-iFiles.sort()
-nFi = len(iFiles)
 fileQ = queue.Queue()  # queue for loading new texture files
-
-FADE_STEP = 0.025
-nSli = 8
 
 def tex_load():
     """ This function runs all the time in a background thread. It checks the
@@ -73,20 +81,23 @@ def tex_load():
     while True:
         slide = fileQ.get()
         try:
-            im = Image.open(slide.fname)
+            im = Image.open(slide.path)
             # this will convert to RGBA and set alpha to opaque
             im.putalpha(255)
             slide.orientation = 1
             if EXIF_DATID is not None and EXIF_ORIENTATION is not None:
                 try:
                     exif_data = im._getexif()
-                    slide.dt = time.mktime(
-                        time.strptime(exif_data[EXIF_DATID], '%Y:%m:%d %H:%M:%S'))
-                    slide.orientation = int(exif_data[EXIF_ORIENTATION])
+                    if exif_data is not None:
+                        if exif_data[EXIF_DATID] != '0000:00:00 00:00:00':
+                            slide.dt = time.mktime(time.strptime(exif_data[EXIF_DATID], '%Y:%m:%d %H:%M:%S'))
+                        else:
+                            slide.dt = os.path.getmtime(slide.path)
+                        slide.orientation = int(exif_data[EXIF_ORIENTATION])
                 except Exception as e:  # NB should really check error here but it's almost certainly due to lack of exif data
-                    LOGGER.warning('exif read error. File: {} Error: {}'.format(slide.fname,e))
+                    LOGGER.warning('exif read error. File: {} Error: {}'.format(slide.path, e))
                     # so use file last modified date
-                    slide.dt = os.path.getmtime(slide.fname)
+                    slide.dt = os.path.getmtime(slide.path)
             if slide.orientation == 2:
                 im = im.transpose(Image.FLIP_LEFT_RIGHT)
             if slide.orientation == 3:
@@ -106,7 +117,6 @@ def tex_load():
                 do_resize = False
             else:
                 do_resize = True
-            
             # tex = pi3d.Texture(item[0], blend=True, mipmap=False) #pixelly but faster 3.3MB in 3s
             # nicer but slower 3.3MB in 4.5s
             #tex = pi3d.Texture(fname, blend=True, mipmap=True)
@@ -121,37 +131,64 @@ def tex_load():
             yi = (DISPLAY.height - hi)/2
             slide.tex = tex
             slide.dimensions = (wi, hi, xi, yi)
+            slide.state = 'Loaded'
         except Exception as e:
-            LOGGER.error("Failed to load. File: {} Error: {}".format(slide.fname, e))
+            LOGGER.error("Failed to load. File: {} Error: {}".format(slide.path, e))
             slide.error = True
+            slide.state = 'Error'
+        slide.log_debug()
         fileQ.task_done()
 
 
 class Slide(object):
-    def reset(self, fname=None):
+    def reset(self, path=None, pfile=None):
+        # Set path from pfile if required.
+        if path is None and pfile is not None:
+            self.path = os.path.join(PIC_DIR, pfile.pic_dir.rel_dir_name, pfile.file_name)
+        else:
+            self.path = path
+        # create pfile from path if required
+        if pfile is None and self.path is not None:
+            pd = PLib.PicDir(os.path.relpath(os.path.dirname(self.path), PIC_DIR))
+            self.pfile = pd.add_file(os.path.basename(self.path))
+        else:
+            self.pfile = pfile
+        self.dir_name = self.pfile.pic_dir.rel_dir_name
+        self.fname = self.pfile.file_name
         self.tex = None
         self.dimensions = None
         self.orientation = 1
         self.dt = None
-        self.fname = fname
         self.error = False
         self.shader = random.choice(shader)
+        self.state = 'Reset'
+        self.log_debug()
 
-    def __init__(self, fname=None):
-        self.reset(fname)
+    def __init__(self, path=None, pfile=None, buf_num=None):
+        self.buf_num = buf_num
+        self.reset(path, pfile)
+
+    def log_debug(self):
+        LOGGER.debug('{} {} {}'.format(self.buf_num, self.state, self.path))
 
 class Frame(pi3d.Canvas):
     def __init__(self, slide, fade=1.0):
         super(Frame, self).__init__()
-        self.set_tex(slide, fade=fade)
+        if slide.error:
+            LOGGER.warning('Slide {} no good for creating Frame'.format(slide.path))
+        else:
+            self.set_tex(slide, fade=fade)
 
     def set_fade(self, fade):
+        if fade > 1.0:
+            fade = 1.0
         self.fade = fade
         self.unif[44] = fade
 
-    def inc_fade(self, fade_step=FADE_STEP):
+    def inc_fade(self, fade_step):
         if self.fade < 1.0:
             self.set_fade(self.fade + fade_step)
+
 
     def set_tex(self, sbg, sfg=None, fade=0.0):
         self.set_fade(fade)
@@ -166,51 +203,35 @@ class Frame(pi3d.Canvas):
 
 
 class Carousel:
-    def __init__(self):
-        self.canvas = pi3d.Canvas()
-        self.canvas.set_shader(shader[0])
-        self.fade = 0.0
+    def __init__(self, piclist, frame, nSli=NUM_SLIDES):
+        self.iFiles = piclist
+        self.nFi = len(self.iFiles)
+        self.nSli = nSli
         self.slides = []
-        #half = 0
-        for i in range(nSli):
-            s = Slide(iFiles[i % nFi])
+        for i in range(self.nSli):
+            s = Slide(pfile=self.iFiles[i % self.nFi], buf_num=i)
             self.slides.append(s)
             fileQ.put(s)
-
-        self.focus = nSli - 1
-        self.focus_fi = nFi - 1
+        self.focus = self.nSli - 1
+        self.focus_fi = self.nFi - 1
+        self.frame = frame
 
     def next(self, step=1):
-        self.fade = 0.0
         sfg = self.slides[self.focus]  # foreground
-        self.focus = (self.focus + step) % nSli
-        self.focus_fi = (self.focus_fi + step) % nFi
-        sbg = self.slides[self.focus]  # background
-        self.canvas.set_shader(sbg.shader)
-        self.canvas.set_draw_details(self.canvas.shader, [sfg.tex, sbg.tex])
-        self.canvas.set_2d_size(
-            sbg.dimensions[0], sbg.dimensions[1], sbg.dimensions[2], sbg.dimensions[3])
-        # need to pass shader dimensions for both textures
-        self.canvas.unif[48:54] = self.canvas.unif[42:48]
-        self.canvas.set_2d_size(
-            sfg.dimensions[0], sfg.dimensions[1], sfg.dimensions[2], sfg.dimensions[3])
+        self.focus = (self.focus + step) % self.nSli
+        self.focus_fi = (self.focus_fi + step) % self.nFi
+        self.sbg = self.slides[self.focus]  # background
+        self.sbg.state = self.sbg.state+' B'
+        self.sbg.log_debug()
+        self.frame.set_tex(self.sbg, sfg)
         # get thread to put one in end of pipe
-        s = self.slides[(self.focus + int(0.5 - 4.5 * step)) % nSli]
-        s.reset(iFiles[(self.focus_fi + int(0.5 + 3.5 * step)) % nFi])
+        s = self.slides[(self.focus + int(0.5 - 4.5 * step)) % self.nSli]
+        s.reset(pfile=self.iFiles[(self.focus_fi + int(0.5 + 3.5 * step)) % self.nFi])
         fileQ.put(s)
         # fileQ.join()
 
     def prev(self):
         self.next(step=-1)
-
-    def update(self):
-        if self.fade < 1.0:
-            self.fade += fade_step
-
-    def draw(self):
-        self.update()
-        self.canvas.unif[44] = self.fade
-        self.canvas.draw()
 
 XIF_DATID = None  # this needs to be set before tex_load() above can extract exif date info
 EXIF_ORIENTATION = None
@@ -253,60 +274,103 @@ status_tb = pi3d.TextBlock(x = DISPLAY.width * -0.15,  y = DISPLAY.height * -0.5
                            size = 0.99, spacing = "F", space = 0.02, colour = (1.0, 0.0, 0.0, 1.0))
 status_pt.add_text_block(status_tb)
 
-crsl = Carousel()
-
 t = threading.Thread(target=tex_load)
 t.daemon = True
 t.start()
 
-bg = Slide(BG_IMAGE)
-fileQ.put(bg)
-
-# block the world, for now, until all the initial textures are in.
-# later on, if the UI overruns the thread, there will be no crashola since the
-# old texture should still be there.
-fileQ.join()
-frame = Frame(bg)
-
-crsl.next()  # use to set up draw details for canvas
-crsl.fade = 1.0  # so doesnt transition to slide #1
-
 # Fetch key presses
 mykeys = pi3d.Keyboard()
 CAMERA.was_moved = False  # to save a tiny bit of work each loop
-pictr = 0  # to do shader changing
-shnum = 0
-lasttm = time.time()
-tmdelay = 8.0
 
-display_elements = [frame]
-while DISPLAY.loop_running():
-    for e in display_elements:
-        e.draw()
-    #crsl.update()
-    #crsl.draw()
-    tm = time.time()
-    if tm > (lasttm + tmdelay):
-        lasttm = tm
-        crsl.next()
+pl = PLib.PicLibrary(src_dir=PIC_DIR, path_regxs=PATH_REGXS)
+#pl = PLib.PicLibrary(src_dir=PIC_DIR)
 
-    k = mykeys.read()
-    #k = -1
-    if k > -1:
-        pictr += 1
-        # shader change only happens after 4 button presses (ie not auto changes)
-        if pictr > 3:
-            pictr = 0
-            shnum = (shnum + 1) % 4
-            crsl.canvas.set_shader(shader[shnum])
-        if k == 27:  # ESC
-            mykeys.close()
-            DISPLAY.stop()
-            break
-        if k == 115:  # S go back a picture
-            crsl.prev()
-        # all other keys load next picture
-        else:
+def process_thread(time_delay=10, trans_secs=3):
+    global pl, run_proc, display_elements
+    try:
+        run_proc = True
+        frame_sleep = 1.0/FPS
+        fade_inc = frame_sleep/trans_secs
+        #for __i in range(2):
+        while run_proc:
+            # Splash background image
+            bg = Slide(path=BG_IMAGE)
+            fileQ.put(bg)
+            fileQ.join() # wait for load to complete
+            frame = Frame(bg)
+            text_attr.status = 'No Pictures!'
+            status_pt.regen()
+            display_elements = [frame, title_pt, status_pt]
+            # Update pic library list
+            pl.update()
+            while pl.update_thread.is_alive():
+                if pl.cur_pic is not None:
+                    text_attr.dir = pl.cur_pic.pic_dir.rel_dir_name
+                    text_attr.fname = pl.cur_pic.file_name
+                    file_pt.regen()
+                    display_elements = [frame, title_pt, file_pt]
+                time.sleep(frame_sleep)
+            # No pictures found
+            if pl.file_cnt == 0:
+                text_attr.status = 'No images selected!'
+                status_pt.regen()
+                display_elements = [frame, title_pt, status_pt]
+                while run_proc: # go to sleep
+                    time.sleep(10)
+                return
+            # Create slide carousel
+            text_attr.status = 'Buffering Slides...'
+            status_pt.regen()
+            display_elements = [frame, title_pt, status_pt]
+            crsl = Carousel(pl.pic_files, frame)
+            fileQ.join() # wait for slides to load
+            # Start with first 
+            display_elements = [frame]
             crsl.next()
+            frame.set_fade(1.0)
+            display_elements = [frame, file_pt, status_pt]
+            while run_proc:
+                text_attr.dir = crsl.sbg.dir_name
+                text_attr.fname = crsl.sbg.fname
+                text_attr.date = time.strftime("%a %d %b %Y", time.localtime(crsl.sbg.dt))
+                file_pt.regen()
+                text_attr.status = '{} {} {}'.format(crsl.sbg.buf_num, crsl.sbg.state, crsl.sbg.orientation)
+                status_pt.regen()
+                # transistion to background slide
+                while run_proc and frame.fade < 1.0:
+                    time.sleep(frame_sleep)
+                    frame.inc_fade(fade_inc)
+                time.sleep(time_delay)
+                # switch bg to fg and load new bg with fade = 0.0
+                crsl.next()
+                # Wrapped back to start of file list
+                if crsl.focus_fi == 0:
+                    break
+    except KeyboardInterrupt:
+        return
 
-DISPLAY.destroy()
+display_elements = []
+run_proc = True
+proc_thread = threading.Thread(target=process_thread, args=(TIME_DELAY, FADE_TIME,))
+proc_thread.start()
+
+#time.sleep(15)
+try:
+    while DISPLAY.loop_running() and proc_thread.is_alive():
+        for e in display_elements:
+            e.draw()
+
+        k = mykeys.read()
+        #k = -1
+        if k > -1:
+            if k == 27:  # ESC
+                break
+finally:
+    LOGGER.info('Stopping...')
+#    time.sleep(60)
+    DISPLAY.stop()
+    run_proc = False
+    proc_thread.join()
+    mykeys.close()
+    DISPLAY.destroy()
+    LOGGER.info('Bye')
